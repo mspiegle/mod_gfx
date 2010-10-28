@@ -1,0 +1,14 @@
+** mod_gfx **
+
+Who?
+====
+mod_gfx was written by Michael Spiegle
+
+What?
+=====
+mod_gfx provides a way to perform fast on-the-fly image resizing from within
+apache.
+
+Where?
+======
+The homepage is at http://nauticaltech.com/software/mod_gfx
