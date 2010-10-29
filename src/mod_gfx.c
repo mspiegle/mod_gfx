@@ -32,8 +32,43 @@
 
 static int
 filter(ap_filter_t* f, apr_bucket_brigade* bb) {
-	ap_log_error(APLOG_MARK, APLOG_INFO, 0, f->r->server,
-	             "gfx_filter(): This is a test");
+	ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
+	             "filter(): Called");
+
+	gfx_filter_ctx_t* ctx = f->ctx;
+	apr_bucket* b;
+
+	//short circuit for empty responses
+	if (APR_BRIGADE_EMPTY(bb)) {
+		return ap_pass_brigade(f->next, bb);
+	}
+
+	//if we didn't have a pre-existing context, then we can create it here
+	//and initialize it.
+	if (ctx == NULL) {
+		f->ctx = ctx = apr_pcalloc(f->r->pool, sizeof(gfx_filter_ctx_t));
+
+		//we have a temporary bucket brigade to store data in over subsequent calls
+		//to the filter.
+		ctx->tempbb = apr_brigade_create(f->r->pool, f->c->bucket_alloc);
+	}
+
+	//let's do a loopy loop
+	//while ((b = APR_BRIGADE_FIRST(bb)) && (b != APR_BRIGADE_SENTINEL(bb))) {
+	for (b = APR_BRIGADE_FIRST(bb);
+	     b != APR_BRIGADE_SENTINEL(bb);
+			 b = APR_BUCKET_NEXT(b)) {
+		if (APR_BUCKET_IS_EOS(b)) {
+			ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
+			             "filter(): Got EOS bucket");
+		}
+		if (APR_BUCKET_IS_FLUSH(b)) {
+			ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
+			             "filter(): Got FLUSH bucket");
+		}
+		ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
+		             "filter(): Length = [%lu]", b->length);
+	}
 
 	return ap_pass_brigade(f->next, bb);
 }

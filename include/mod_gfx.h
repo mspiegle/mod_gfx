@@ -23,19 +23,26 @@
 #ifndef _MOD_GFX_H_
 #define _MOD_GFX_H_
 
-#include <apr_errno.h>
-#include <apr_pools.h>
+#include <gd.h>
+
 #include <httpd.h>
 #include <http_config.h>
 #include <apr_hash.h>
-#include <gd.h>
+
+#include <apr_errno.h>
+#include <apr_pools.h>
+#include <apr_buckets.h>
+
+typedef struct {
+	apr_bucket_brigade* tempbb;
+} gfx_filter_ctx_t;
 
 typedef enum {
 	IMAGE_TYPE_JPG = 0x20,
 	IMAGE_TYPE_PNG,
 	IMAGE_TYPE_GIF,
 	IMAGE_TYPE_SRC
-} image_type_t;
+} gfx_type_t;
 
 typedef enum {
 	IMAGE_ACTION_RESIZE = 0x40,
@@ -43,7 +50,7 @@ typedef enum {
 	IMAGE_ACTION_CROP,
 	IMAGE_ACTION_WATERMARK,
 	IMAGE_ACTION_NOOP
-} image_action_t;
+} gfx_action_t;
 
 const char IMAGE_JPG_SIG[] = { (char)0xFF, (char)0xD8, (char)0xFF };
 const char IMAGE_GIF_SIG[] = { (char)0x47, (char)0x49, (char)0x46 };
@@ -55,5 +62,4 @@ const char IMAGE_PNG_SIG[] = { (char)0x89, (char)0x50, (char)0x4E, (char)0x47,
 #define IMAGE_PNG_SIZE 8
 
 #endif
-
 // vim: ts=2
