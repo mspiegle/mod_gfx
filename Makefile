@@ -44,4 +44,11 @@ clean:
 	rm -f $(SRCDIR)/$(MODULE).slo
 	rm -rf $(SRCDIR)/.libs
 
+run:
+	sudo gdb -d /home/mspiegle/tmp/httpd-source --args /usr/sbin/apache2 -X -D DEFAULT_VHOST -D PHP5 -D PROXY -d /usr/lib64/apache2 -f /etc/apache2/httpd.conf -k start
+	sudo killall apache2 2>&1 >/dev/null
+
+debug:
+	$(MAKE) clean && $(MAKE) && $(MAKE) install && $(MAKE) run
+
 # vim: ts=2

@@ -50,27 +50,90 @@ filter(ap_filter_t* f, apr_bucket_brigade* bb) {
 
 		//we have a temporary bucket brigade to store data in over subsequent calls
 		//to the filter.
-		ctx->tempbb = apr_brigade_create(f->r->pool, f->c->bucket_alloc);
+		ctx->temp_brigade = apr_brigade_create(f->r->pool, f->c->bucket_alloc);
 	}
 
 	//let's do a loopy loop
-	//while ((b = APR_BRIGADE_FIRST(bb)) && (b != APR_BRIGADE_SENTINEL(bb))) {
-	for (b = APR_BRIGADE_FIRST(bb);
-	     b != APR_BRIGADE_SENTINEL(bb);
-			 b = APR_BUCKET_NEXT(b)) {
+	for (b = APR_BRIGADE_FIRST(bb); b != APR_BRIGADE_SENTINEL(bb); 
+	     b = APR_BUCKET_NEXT(b)) {
+
+		//tell us what kind of bucket we have (for debugging)
+		log_bucket_type(f, b);
+
+		//if we do get a sentinel, then we should be able to resize the image
 		if (APR_BUCKET_IS_EOS(b)) {
 			ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
-			             "filter(): Got EOS bucket");
+			             "filter(): returning due to EOS");
+			ap_pass_brigade(f->next, bb);
 		}
-		if (APR_BUCKET_IS_FLUSH(b)) {
-			ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
-			             "filter(): Got FLUSH bucket");
-		}
-		ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
-		             "filter(): Length = [%lu]", b->length);
-	}
 
-	return ap_pass_brigade(f->next, bb);
+		//we aren't going to pass meta buckets because we can't do much with them 
+		//until we're done anyways
+		if (APR_BUCKET_IS_METADATA(b)) {
+			ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
+			             "filter(): skipping bucket");
+			continue;
+		}
+		
+		//we need to build up our temp_brigade.  first, make a copy of the bucket
+		ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
+		             "filter(): copying bucket");
+		apr_status_t ret;
+		apr_bucket* temp;
+		if (APR_SUCCESS != (ret = apr_bucket_copy(b, &temp))) {
+			ap_log_error(APLOG_MARK, APLOG_CRIT, 0, f->r->server,
+			             "filter(): failed to copy bucket");
+			return ret;
+		}
+
+		//next, ensure that bucket goes to the heap
+		ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
+		             "filter(): setaside bucket");
+		if (APR_SUCCESS != (ret = apr_bucket_setaside(temp, f->r->pool))) {
+			ap_log_error(APLOG_MARK, APLOG_CRIT, 0, f->r->server,
+			             "filter(): failed to setaside bucket");
+			return ret;
+		}
+
+
+	}
+}
+
+static void
+log_bucket_type(ap_filter_t* f, apr_bucket* b) {
+if (APR_BUCKET_IS_EOS(b)) {
+		ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
+		             "filter(): type=EOS len=[%lu]", b->length);
+	}
+	if (APR_BUCKET_IS_FLUSH(b)) {
+		ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
+		             "filter(): type=FLUSH len=[%lu]", b->length);
+	}
+	
+	if (APR_BUCKET_IS_FILE(b)) {
+		ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
+		             "filter(): type=FILE len=[%lu]", b->length);
+	}
+	
+	if (APR_BUCKET_IS_PIPE(b)) {
+		ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
+		             "filter(): type=PIPE len=[%lu]", b->length);
+	}
+	
+	if (APR_BUCKET_IS_HEAP(b)) {
+		ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
+		             "filter(): type=HEAP len=[%lu]", b->length);
+	}
+	
+	if (APR_BUCKET_IS_TRANSIENT(b)) {
+		ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
+		             "filter(): type=TRANSIENT len=[%lu]", b->length);
+	}
+	
+	if (APR_BUCKET_IS_IMMORTAL(b)) {
+		ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
+		             "filter(): type=IMMORTAL len=[%lu]", b->length);
+	}
 }
 
 static void

@@ -27,14 +27,15 @@
 
 #include <httpd.h>
 #include <http_config.h>
-#include <apr_hash.h>
+#include <util_filter.h>
 
+#include <apr_hash.h>
 #include <apr_errno.h>
 #include <apr_pools.h>
 #include <apr_buckets.h>
 
 typedef struct {
-	apr_bucket_brigade* tempbb;
+	apr_bucket_brigade* temp_brigade;
 } gfx_filter_ctx_t;
 
 typedef enum {
@@ -60,6 +61,8 @@ const char IMAGE_PNG_SIG[] = { (char)0x89, (char)0x50, (char)0x4E, (char)0x47,
 #define IMAGE_JPG_SIZE 3
 #define IMAGE_GIF_SIZE 3
 #define IMAGE_PNG_SIZE 8
+
+static void log_bucket_type(ap_filter_t* f, apr_bucket* b);
 
 #endif
 // vim: ts=2
