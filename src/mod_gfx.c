@@ -64,7 +64,8 @@ filter(ap_filter_t* f, apr_bucket_brigade* bb) {
 		if (APR_BUCKET_IS_EOS(b)) {
 			ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
 			             "filter(): returning due to EOS");
-			ap_pass_brigade(f->next, bb);
+			APR_BRIGADE_INSERT_TAIL(ctx->temp_brigade, b);
+			return ap_pass_brigade(f->next, ctx->temp_brigade);
 		}
 
 		//we aren't going to pass meta buckets because we can't do much with them 
@@ -72,6 +73,7 @@ filter(ap_filter_t* f, apr_bucket_brigade* bb) {
 		if (APR_BUCKET_IS_METADATA(b)) {
 			ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
 			             "filter(): skipping bucket");
+			APR_BUCKET_REMOVE(b);
 			continue;
 		}
 		
@@ -95,8 +97,12 @@ filter(ap_filter_t* f, apr_bucket_brigade* bb) {
 			return ret;
 		}
 
-
+		//now we can add the bucket to our temp brigade
+		APR_BRIGADE_INSERT_TAIL(ctx->temp_brigade, temp);
 	}
+	//return ap_pass_brigade(f->next, bb);
+	ap_log_error(APLOG_MARK, APLOG_CRIT, 0, f->r->server,
+	             "filter(): if we got here, then the loop is done");
 }
 
 static void
