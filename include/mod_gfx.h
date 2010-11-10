@@ -43,7 +43,7 @@ typedef enum {
 	IMAGE_TYPE_PNG,
 	IMAGE_TYPE_GIF,
 	IMAGE_TYPE_SRC
-} gfx_type_t;
+} gfx_image_type_t;
 
 typedef enum {
 	IMAGE_ACTION_RESIZE = 0x40,
@@ -63,6 +63,9 @@ const char IMAGE_PNG_SIG[] = { (char)0x89, (char)0x50, (char)0x4E, (char)0x47,
 #define IMAGE_PNG_SIZE 8
 
 static void log_bucket_type(ap_filter_t* f, apr_bucket* b);
+static void debug_brigade(ap_filter_t* f, apr_bucket_brigade* bb);
+static gdImagePtr gd_from_blob(char*, apr_size_t, gfx_image_type_t*);
+static int get_image_type(char* buffer, apr_size_t);
 
 #endif
 // vim: ts=2

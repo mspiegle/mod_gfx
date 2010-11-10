@@ -32,12 +32,6 @@
 
 static int
 filter(ap_filter_t* f, apr_bucket_brigade* bb) {
-	ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
-	             "filter(): Called");
-
-	gfx_filter_ctx_t* ctx = f->ctx;
-	apr_bucket* b;
-
 	//short circuit for empty responses
 	if (APR_BRIGADE_EMPTY(bb)) {
 		return ap_pass_brigade(f->next, bb);
@@ -45,7 +39,9 @@ filter(ap_filter_t* f, apr_bucket_brigade* bb) {
 
 	//if we didn't have a pre-existing context, then we can create it here
 	//and initialize it.
+	gfx_filter_ctx_t* ctx = f->ctx;
 	if (ctx == NULL) {
+		//get a new config
 		f->ctx = ctx = apr_pcalloc(f->r->pool, sizeof(gfx_filter_ctx_t));
 
 		//we have a temporary bucket brigade to store data in over subsequent calls
@@ -54,32 +50,60 @@ filter(ap_filter_t* f, apr_bucket_brigade* bb) {
 	}
 
 	//let's do a loopy loop
+	apr_bucket* b;
 	for (b = APR_BRIGADE_FIRST(bb); b != APR_BRIGADE_SENTINEL(bb); 
 	     b = APR_BUCKET_NEXT(b)) {
 
-		//tell us what kind of bucket we have (for debugging)
-		log_bucket_type(f, b);
-
-		//if we do get a sentinel, then we should be able to resize the image
+		//EOS received, perform our profile operations
 		if (APR_BUCKET_IS_EOS(b)) {
 			ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
-			             "filter(): returning due to EOS");
-			APR_BRIGADE_INSERT_TAIL(ctx->temp_brigade, b);
+			             "filter(): EOS received");
+
+			//we don't need the EOS bucket... we can create one later
+			APR_BUCKET_REMOVE(b);
+
+			//we need to get the data as a single buffer
+			apr_status_t ret;
+			char* buffer = NULL;
+			apr_size_t buffer_length = 0;
+			ret = apr_brigade_pflatten(ctx->temp_brigade, &buffer, &buffer_length,
+			                           f->r->pool);
+			if (ret != APR_SUCCESS) {
+				ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
+				             "filter(): pflatten() failed");
+				return ret;
+			}
+
+			//make a gd object from the source data
+			//TODO: register cleanup function for blob
+			gdImagePtr src_image = NULL;
+			gfx_image_type_t image_type;
+			src_image = gd_from_blob(buffer, buffer_length, &image_type);
+			if (NULL == src_image) {
+				ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
+				             "filter(): gd_from_blob() failed");
+				//TODO: what's the right way to handle errors in the filter?
+				return APR_EGENERAL;
+			}
+
+			//make a gd object for the output data
+			gdImagePtr dst_image = NULL;
+			dst_image = gdImageCreateTrueColor(250, 250);
+			gdImageCopyResized(dst_image, src_image, 0, 0, 0, 0, 250, 250, 250, 250);
+
+
 			return ap_pass_brigade(f->next, ctx->temp_brigade);
 		}
 
-		//we aren't going to pass meta buckets because we can't do much with them 
-		//until we're done anyways
+		//we don't really care about metadata buckets
 		if (APR_BUCKET_IS_METADATA(b)) {
-			ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
-			             "filter(): skipping bucket");
 			APR_BUCKET_REMOVE(b);
 			continue;
 		}
 		
 		//we need to build up our temp_brigade.  first, make a copy of the bucket
-		ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
-		             "filter(): copying bucket");
+		//TODO: let's see if we can just add the bucket to temp_brigade, then
+		//remove it from bb.  might be faster than copying and stuff.
 		apr_status_t ret;
 		apr_bucket* temp;
 		if (APR_SUCCESS != (ret = apr_bucket_copy(b, &temp))) {
@@ -88,9 +112,7 @@ filter(ap_filter_t* f, apr_bucket_brigade* bb) {
 			return ret;
 		}
 
-		//next, ensure that bucket goes to the heap
-		ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->r->server,
-		             "filter(): setaside bucket");
+		//next, ensure that bucket goes somewhere semi-permanent
 		if (APR_SUCCESS != (ret = apr_bucket_setaside(temp, f->r->pool))) {
 			ap_log_error(APLOG_MARK, APLOG_CRIT, 0, f->r->server,
 			             "filter(): failed to setaside bucket");
@@ -100,9 +122,76 @@ filter(ap_filter_t* f, apr_bucket_brigade* bb) {
 		//now we can add the bucket to our temp brigade
 		APR_BRIGADE_INSERT_TAIL(ctx->temp_brigade, temp);
 	}
-	//return ap_pass_brigade(f->next, bb);
-	ap_log_error(APLOG_MARK, APLOG_CRIT, 0, f->r->server,
-	             "filter(): if we got here, then the loop is done");
+	//TODO: this might not be right - figure it out
+	return ap_pass_brigade(f->next, bb);
+}
+
+static gdImagePtr
+gd_from_blob(char* buffer, apr_size_t buffer_length,
+             gfx_image_type_t* image_type) {
+	//this simple function creates a gd object based on the original source type
+	//make sure the passed image_type is somewhat valid
+	if (image_type == NULL) {
+		return NULL;
+	}
+
+	//figure out the image type and get us the appropriate gd object
+	switch (get_image_type(buffer, buffer_length)) {
+		case IMAGE_TYPE_JPG:
+			return gdImageCreateFromJpegPtr(buffer_length, buffer);
+			break;
+
+		case IMAGE_TYPE_PNG:
+			return gdImageCreateFromPngPtr(buffer_length, buffer);
+			break;
+
+		case IMAGE_TYPE_GIF:
+			return gdImageCreateFromGifPtr(buffer_length, buffer);
+			break;
+	}
+
+	return NULL;
+}
+
+static int
+get_image_type(char* buffer, apr_size_t buffer_length) {
+	//fast magic check to see what type an image is
+	if (buffer == NULL) {
+		return -1;
+	}
+
+	//check for jpeg
+	if (buffer_length >= IMAGE_JPG_SIZE) {
+		if (memcmp(buffer, IMAGE_JPG_SIG, IMAGE_JPG_SIZE) == 0) {
+			return IMAGE_TYPE_JPG;
+		}
+	}
+
+	//check for png
+	if (buffer_length >= IMAGE_PNG_SIZE) {
+		if (memcmp(buffer, IMAGE_PNG_SIG, IMAGE_PNG_SIZE) == 0) {
+			return IMAGE_TYPE_PNG;
+		}
+	}
+
+	//check for gif
+	if (buffer_length >= IMAGE_GIF_SIZE) {
+		if (memcmp(buffer, IMAGE_GIF_SIG, IMAGE_GIF_SIZE) == 0) {
+			return IMAGE_TYPE_GIF;
+		}
+	}
+	
+	return -1;
+}
+
+static void
+debug_brigade(ap_filter_t* f, apr_bucket_brigade* bb) {
+	//just do a quick loop and print out the bucket types
+	apr_bucket* b;
+	for (b = APR_BRIGADE_FIRST(bb); b != APR_BRIGADE_SENTINEL(bb);
+	     b = APR_BUCKET_NEXT(b)) {
+		log_bucket_type(f, b);
+	}
 }
 
 static void
